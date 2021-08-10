@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+
 
 class Mish(nn.Module):
     @staticmethod
@@ -59,7 +61,7 @@ class CSPBlock(nn.Module):
         )
 
     def forward(self, x):
-        c_2 = x.shape[1] // 2
+        c_2 = x.size(1) // 2
         x_2 = x[:, c_2:, :]
         x_2 = self.conv1(x_2)
         x_2 = self.residual(x_2)
@@ -233,6 +235,23 @@ class DarkNet_53_Mish(nn.Module):
         x = self.out(x)
         return torch.flatten(x)
 
+def predict_transform(predictions, input_shape=416, anchors = [(10, 13), (16, 30), (33, 23)]):
+    batch_size = predictions.size(0)
+    attributes = predictions.size(1) // 3
+    grid_size = predictions.size(2)
+    stride = input_shape // grid_size
+    num_anchors = len(anchors)
+
+    grid = np.arange(grid_size)
+    a,b = np.meshgrid(grid, grid)
+    y_offset = torch.FloatTensor(a).unsqueeze(0)
+    x_offset = torch.FloatTensor(b).unsqueeze(0)
+    xy_offset = torch.cat((x_offset, y_offset), 0)
+    predictions[:, :2, :, :] += xy_offset
+    predictions[:, attributes:attributes+2, :, :] += xy_offset
+    predictions[:, attributes*2:attributes*2+2, :, :] += xy_offset
+
+
 
 class YOLOv4_Mish_416(nn.Module):
     def __init__(self):
@@ -269,7 +288,7 @@ class YOLOv4_Mish_416(nn.Module):
             Conv(in_c=1024, out_c=512, k=1, s=1, p=0),  # still dense
             SPP_YOLO()
         )
-        self.PANet = PANet()
+        self.PANet = PANet() # contains YOLO detection
 
     def forward(self, x):
         x = self.layer_1(x)
@@ -278,18 +297,21 @@ class YOLOv4_Mish_416(nn.Module):
         pan_2 = self.layer_4(pan_1)
         x = self.layer_5(pan_2)
         x = self.layer_6(x)
-        x1, x2, x3 = self.PANet(x, pan_1, pan_2)
-        return x1, x2, x3
+        pred_52, pred_26, pred_13 = self.PANet(x, pan_1, pan_2)
+        pred_52 = predict_transform(pred_52)
+        pred_26 = predict_transform(pred_26)
+        pred_13 = predict_transform(pred_13)
+        predictions = torch.cat((pred_52, pred_26, pred_13), 1)
+        return predictions
 
 
-model = YOLOv4_Mish_416()
-x = torch.rand(1, 3, 416, 416)
-y1, y2, y3 = model(x)
-print(y1.shape)
-print(y2.shape)
-print(y3.shape)
-x = torch.rand(1, 3, 256, 256)
-y1, y2, y3 = model(x)
-print(y1.shape)
-print(y2.shape)
-print(y3.shape)
+#model = YOLOv4_Mish_416()
+#x = torch.rand(1, 3, 416, 416)
+#predictions = model(x)
+#print(predictions.size())
+#print(predictions[:,:20,:5])
+
+x = np.arange(0, 13*13*255, 1)
+x -= x
+x = torch.FloatTensor(x).view((1, 255, 13, 13))
+predict_transform(x)
