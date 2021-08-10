@@ -5,6 +5,49 @@ import torch.nn.functional as F
 import numpy as np
 
 
+def predict_transform(predictions, input_shape=416, anchors=None):
+    if anchors is None:
+        anchors = [(10, 13), (16, 30), (33, 23)]
+    batch_size = predictions.size(0)
+    grid_size = predictions.size(2)
+    stride = input_shape // grid_size
+    bbox_attrs = predictions.size(1) // 3
+    num_anchors = len(anchors)
+
+    anchors = [(a[0] / stride, a[1] / stride) for a in anchors]
+
+    predictions = predictions.view(batch_size, bbox_attrs * num_anchors, grid_size * grid_size)
+    predictions = predictions.transpose(1, 2).contiguous()
+    predictions = predictions.view(batch_size, grid_size * grid_size * num_anchors, bbox_attrs)
+
+    # Sigmoid the  centre_X, centre_Y. and object confidence
+    predictions[:, :, 0] = torch.sigmoid(predictions[:, :, 0])
+    predictions[:, :, 1] = torch.sigmoid(predictions[:, :, 1])
+    predictions[:, :, 4] = torch.sigmoid(predictions[:, :, 4])
+
+    # Add the center offsets
+    grid_len = np.arange(grid_size)
+    a, b = np.meshgrid(grid_len, grid_len)
+
+    x_offset = torch.FloatTensor(a).view(-1, 1)
+    y_offset = torch.FloatTensor(b).view(-1, 1)
+
+    x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1, num_anchors).view(-1, 2).unsqueeze(0)
+
+    predictions[:, :, :2] += x_y_offset
+
+    # log space transform height and the width
+    anchors = torch.FloatTensor(anchors)
+    anchors = anchors.repeat(grid_size * grid_size, 1).unsqueeze(0)
+    predictions[:, :, 2:4] = torch.exp(predictions[:, :, 2:4]) * anchors
+
+    # Sigmoid the class scores
+    predictions[:, :, 5: bbox_attrs] = torch.sigmoid((predictions[:, :, 5: 5 + bbox_attrs]))
+    predictions[:, :, :4] *= stride
+
+    return predictions
+
+
 class Mish(nn.Module):
     @staticmethod
     def forward(x):
@@ -88,15 +131,16 @@ class SPP_YOLO(nn.Module):
         x = torch.cat((x, x1, x2, x3), 1)
         return x
 
+
 class PANet_blocks(nn.Module):
     def __init__(self, in_c):
         super().__init__()
         self.convs = nn.Sequential(
-            Conv(in_c=in_c, out_c=in_c//2, k=1, s=1, p=0),
-            Conv(in_c=in_c//2, out_c=in_c, k=3, s=1, p=1),
-            Conv(in_c=in_c, out_c=in_c//2, k=1, s=1, p=0),
-            Conv(in_c=in_c//2, out_c=in_c, k=3, s=1, p=1),
-            Conv(in_c=in_c, out_c=in_c//2, k=1, s=1, p=0),
+            Conv(in_c=in_c, out_c=in_c // 2, k=1, s=1, p=0),
+            Conv(in_c=in_c // 2, out_c=in_c, k=3, s=1, p=1),
+            Conv(in_c=in_c, out_c=in_c // 2, k=1, s=1, p=0),
+            Conv(in_c=in_c // 2, out_c=in_c, k=3, s=1, p=1),
+            Conv(in_c=in_c, out_c=in_c // 2, k=1, s=1, p=0),
         )
 
     def forward(self, x):
@@ -107,35 +151,27 @@ class PANet_blocks(nn.Module):
 class Upsample(nn.Module):
     def __init__(self, in_c):
         super().__init__()
-        self.conv = Conv(in_c=in_c, out_c=in_c//2, k=1, s=1, p=0)
+        self.conv = Conv(in_c=in_c, out_c=in_c // 2, k=1, s=1, p=0)
 
     def forward(self, x):
         x = self.conv(x)
-        x = F.interpolate(x, scale_factor=(2,2)) # 100% sure there is a better way to do this
+        x = F.interpolate(x, scale_factor=(2, 2))  # 100% sure there is a better way to do this
         return x
 
 
 class Downsample(nn.Module):
     def __init__(self, in_c):
         super().__init__()
-        self.conv = Conv(in_c=in_c, out_c=in_c*2, k=3, s=2, p=1) # stride=2, this is the PANet thing (mentioned in paper)
+        self.conv = Conv(in_c=in_c, out_c=in_c * 2, k=3, s=2,
+                         p=1)  # stride=2, this is the PANet thing (mentioned in paper)
 
     def forward(self, x):
         x = self.conv(x)
         return x
 
 
-class YOLOv3(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.yolo = None
-
-    def forward(self, x):
-        return x
-
-
 class PANet(nn.Module):
-    def __init__(self):
+    def __init__(self, classes=80):
         super().__init__()
         self.layer_1 = nn.Sequential(
             Conv(in_c=2048, out_c=512, k=1, s=1, p=0),
@@ -150,22 +186,19 @@ class PANet(nn.Module):
         self.layer_3 = PANet_blocks(in_c=256)
         self.yolo_52 = nn.Sequential(
             Conv(in_c=128, out_c=256, k=3, s=1, p=1),
-            nn.Conv2d(in_channels=256, out_channels=255, kernel_size=1, stride=1, padding=0),  # 52x52x255
-            YOLOv3(),
+            nn.Conv2d(in_channels=256, out_channels=((5 + classes) * 3), kernel_size=1, stride=1, padding=0),  # 52x52x255
         )
         self.downsample_1 = Downsample(in_c=128)
         self.layer_4 = PANet_blocks(in_c=512)
         self.yolo_26 = nn.Sequential(
             Conv(in_c=256, out_c=512, k=3, s=1, p=1),
-            nn.Conv2d(in_channels=512, out_channels=255, kernel_size=1, stride=1, padding=0),  # 26x26x255
-            YOLOv3(),
+            nn.Conv2d(in_channels=512, out_channels=((5 + classes) * 3), kernel_size=1, stride=1, padding=0),  # 26x26x255
         )
         self.downsample_2 = Downsample(in_c=256)
         self.layer_5 = PANet_blocks(in_c=1024)
         self.yolo_13 = nn.Sequential(
             Conv(in_c=512, out_c=1024, k=3, s=1, p=1),
-            nn.Conv2d(in_channels=1024, out_channels=255, kernel_size=1, stride=1, padding=0),  # 13x13x255
-            YOLOv3(),
+            nn.Conv2d(in_channels=1024, out_channels=((5 + classes) * 3), kernel_size=1, stride=1, padding=0),  # 13x13x255
         )
 
     def forward(self, x, pan_1, pan_2):
@@ -235,26 +268,9 @@ class DarkNet_53_Mish(nn.Module):
         x = self.out(x)
         return torch.flatten(x)
 
-def predict_transform(predictions, input_shape=416, anchors = [(10, 13), (16, 30), (33, 23)]):
-    batch_size = predictions.size(0)
-    attributes = predictions.size(1) // 3
-    grid_size = predictions.size(2)
-    stride = input_shape // grid_size
-    num_anchors = len(anchors)
-
-    grid = np.arange(grid_size)
-    a,b = np.meshgrid(grid, grid)
-    y_offset = torch.FloatTensor(a).unsqueeze(0)
-    x_offset = torch.FloatTensor(b).unsqueeze(0)
-    xy_offset = torch.cat((x_offset, y_offset), 0)
-    predictions[:, :2, :, :] += xy_offset
-    predictions[:, attributes:attributes+2, :, :] += xy_offset
-    predictions[:, attributes*2:attributes*2+2, :, :] += xy_offset
-
-
 
 class YOLOv4_Mish_416(nn.Module):
-    def __init__(self):
+    def __init__(self, classes=80):
         super().__init__()
         self.layer_1 = nn.Sequential(
             Conv(in_c=3, out_c=32, k=3, s=1, p=1),
@@ -288,7 +304,7 @@ class YOLOv4_Mish_416(nn.Module):
             Conv(in_c=1024, out_c=512, k=1, s=1, p=0),  # still dense
             SPP_YOLO()
         )
-        self.PANet = PANet() # contains YOLO detection
+        self.PANet = PANet(classes=classes)  # contains YOLO detection
 
     def forward(self, x):
         x = self.layer_1(x)
@@ -305,13 +321,7 @@ class YOLOv4_Mish_416(nn.Module):
         return predictions
 
 
-#model = YOLOv4_Mish_416()
-#x = torch.rand(1, 3, 416, 416)
-#predictions = model(x)
-#print(predictions.size())
-#print(predictions[:,:20,:5])
-
-x = np.arange(0, 13*13*255, 1)
-x -= x
-x = torch.FloatTensor(x).view((1, 255, 13, 13))
-predict_transform(x)
+model = YOLOv4_Mish_416(classes=5)
+x = torch.rand(1, 3, 416, 416)
+predictions = model(x)
+print(predictions.size())
