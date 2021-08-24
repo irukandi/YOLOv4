@@ -55,6 +55,13 @@ def get_detections(predictions, confidence):
     # class_mask = (predictions[:, :, 5:] > confidence).float()
     # predictions[:, :, 5:] *= class_mask
 
+    box_corners = torch.ones_like(predictions[:, :, :4])
+    box_corners[:, :, 0] = predictions[:, :, 0] - torch.div(predictions[:, :, 2], 2, rounding_mode='floor')
+    box_corners[:, :, 1] = predictions[:, :, 0] - torch.div(predictions[:, :, 3], 2, rounding_mode='floor')
+    box_corners[:, :, 2] = predictions[:, :, 1] + torch.div(predictions[:, :, 2], 2, rounding_mode='floor')
+    box_corners[:, :, 3] = predictions[:, :, 1] + torch.div(predictions[:, :, 3], 2, rounding_mode='floor')
+    predictions[:, :, :4] = box_corners
+
     batch_size = predictions.size(0)
     write = False
     for idx in range(batch_size):
@@ -70,10 +77,22 @@ def get_detections(predictions, confidence):
         # class_score, class_idx = torch.max(image_predictions[:, 5:], 1)
         class_idx = class_idx.unsqueeze(1)
         image_predictions = torch.cat((idx*torch.ones_like(class_idx), image_predictions[:, :5], class_idx), 1) # class_score.unsqueeze(1)
+        image_predictions = NMS(image_predictions)
 
         if not write:
-            detections = image_predictions
+            predictions_buffer = image_predictions
             write = True
         else:
-            detections = torch.cat((detections, image_predictions), 0)
-    return detections
+            predictions_buffer = torch.cat((predictions_buffer, image_predictions), 0)
+    return predictions
+
+def NMS(image_predictions):
+    classes = torch.unique(image_predictions[:, -1])
+    for cls in classes:
+        image_predictions[image_predictions[:, -1] == cls]
+        print(image_predictions.size())
+
+def DIoU(box1, box2):
+    # can be performed for a list of boxes as box2
+    box_1_center = box1
+    pass
