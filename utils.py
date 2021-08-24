@@ -45,11 +45,35 @@ def predict_transform(predictions, input_shape=416, anchors=None):
     return predictions
 
 
-def select_objects(predictions, confidence):
+def get_detections(predictions, confidence):
+    ## select objects
+    global detections
     object_mask = (predictions[:, :, 4] > confidence).float().unsqueeze(2)
     predictions *= object_mask
-    non_zero_ind = torch.nonzero(predictions[:,:,4])
-    predictions = predictions[:,non_zero_ind[:,1]]
-    class_mask = (predictions[:, :, 5:] > confidence).float()
-    predictions[:, :, 5:] *= class_mask
-    return predictions
+
+    ## Required for multiple classes per bounding box
+    # class_mask = (predictions[:, :, 5:] > confidence).float()
+    # predictions[:, :, 5:] *= class_mask
+
+    batch_size = predictions.size(0)
+    write = False
+    for idx in range(batch_size):
+        ## remove background predictions
+        image_predictions = predictions[idx]
+        non_zero_ind = torch.nonzero(image_predictions[:, 4])
+        try:
+            image_predictions = image_predictions[non_zero_ind[:, 0]]
+        except:
+            continue
+
+        class_idx = torch.argmax(image_predictions[:, 5:], 1)
+        # class_score, class_idx = torch.max(image_predictions[:, 5:], 1)
+        class_idx = class_idx.unsqueeze(1)
+        image_predictions = torch.cat((idx*torch.ones_like(class_idx), image_predictions[:, :5], class_idx), 1) # class_score.unsqueeze(1)
+
+        if not write:
+            detections = image_predictions
+            write = True
+        else:
+            detections = torch.cat((detections, image_predictions), 0)
+    return detections

@@ -99,7 +99,7 @@ class YOLOv4_Mish_416(nn.Module):
 
 
 model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
-x = torch.rand(1, 3, 416, 416)
+x = torch.rand(3, 3, 416, 416)
 predictions = model(x)
 print(predictions.size())
-print(select_objects(predictions, 0.5, 0.5)[:,:10])
+print(get_detections(predictions, 0.5).size())
