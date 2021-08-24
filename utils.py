@@ -47,7 +47,6 @@ def predict_transform(predictions, input_shape=416, anchors=None):
 
 def get_detections(predictions, confidence):
     ## select objects
-    global detections
     object_mask = (predictions[:, :, 4] > confidence).float().unsqueeze(2)
     predictions *= object_mask
 
@@ -84,13 +83,27 @@ def get_detections(predictions, confidence):
             write = True
         else:
             predictions_buffer = torch.cat((predictions_buffer, image_predictions), 0)
-    return predictions
+    return predictions_buffer
 
 def NMS(image_predictions):
     classes = torch.unique(image_predictions[:, -1])
+    write = False
     for cls in classes:
-        image_predictions[image_predictions[:, -1] == cls]
-        print(image_predictions.size())
+        try:
+            class_predictions = image_predictions[image_predictions[:, -1] == cls]
+        except:
+            continue
+
+        class_predictions_idx = torch.sort(class_predictions[:,4], descending=True)[1]
+        class_predictions = class_predictions_idx[class_predictions_idx]
+        print(class_predictions.size())
+
+        if not write:
+            class_predictions_buffer = class_predictions
+            write = True
+        else:
+            class_predictions_buffer = torch.cat((class_predictions_buffer, class_predictions), 0)
+    return class_predictions_buffer
 
 def DIoU(box1, box2):
     # can be performed for a list of boxes as box2
