@@ -75,8 +75,9 @@ def get_detections(predictions, confidence):
         class_idx = torch.argmax(image_predictions[:, 5:], 1)
         # class_score, class_idx = torch.max(image_predictions[:, 5:], 1)
         class_idx = class_idx.unsqueeze(1)
-        image_predictions = torch.cat((idx*torch.ones_like(class_idx), image_predictions[:, :5], class_idx), 1) # class_score.unsqueeze(1)
-        image_predictions = NMS(image_predictions)
+        image_predictions = torch.cat((idx * torch.ones_like(class_idx), image_predictions[:, :5], class_idx),
+                                      1)  # class_score.unsqueeze(1)
+        image_predictions = NMS(image_predictions, nms_confidence=0.5)
 
         if not write:
             predictions_buffer = image_predictions
@@ -85,7 +86,8 @@ def get_detections(predictions, confidence):
             predictions_buffer = torch.cat((predictions_buffer, image_predictions), 0)
     return predictions_buffer
 
-def NMS(image_predictions):
+
+def NMS(image_predictions, nms_confidence):
     classes = torch.unique(image_predictions[:, -1])
     write = False
     for cls in classes:
@@ -94,9 +96,19 @@ def NMS(image_predictions):
         except:
             continue
 
-        class_predictions_idx = torch.sort(class_predictions[:,4], descending=True)[1]
-        class_predictions = class_predictions_idx[class_predictions_idx]
-        print(class_predictions.size())
+        class_predictions_idx = torch.sort(class_predictions[:, 4], descending=True)[1]
+        class_predictions = class_predictions[class_predictions_idx]
+
+        amount = class_predictions.size()[0]
+        for idx in range(amount):
+            #try:
+            dious = DIoU(class_predictions[idx], class_predictions[idx+1:])
+            #except ValueError:
+            #    break
+            #except IndexError:
+            #    break
+
+            class_predictions = class_predictions[idx+1:][dious > nms_confidence]
 
         if not write:
             class_predictions_buffer = class_predictions
@@ -105,7 +117,31 @@ def NMS(image_predictions):
             class_predictions_buffer = torch.cat((class_predictions_buffer, class_predictions), 0)
     return class_predictions_buffer
 
+
 def DIoU(box1, box2):
+    # 1 - IoU +
     # can be performed for a list of boxes as box2
-    box_1_center = box1
+
+    box_1_center = torch.zeros(4)
+    box_1_center[0] = box1[1] + torch.div((box1[3] - box1[1]), 2, rounding_mode='floor')
+    box_1_center[1] = box1[2] + torch.div((box1[4] - box1[2]), 2, rounding_mode='floor')
+    box_1_center[2] = box1[3] - box1[1]
+    box_1_center[3] = box1[4] - box1[2]
+
+    box_2_center = torch.ones_like(box2[:,1:5])
+    box_2_center[:, 0] = box2[:, 1] + torch.div((box2[:, 3] - box2[:, 1]), 2, rounding_mode='floor')
+    box_2_center[:, 1] = box2[:, 2] + torch.div((box2[:, 4] - box2[:, 2]), 2, rounding_mode='floor')
+    box_2_center[:, 2] = box2[:, 3] - box2[:, 1]
+    box_2_center[:, 3] = box2[:, 4] - box2[:, 2]
+
+    surrounding_box = torch.zeros(4)
+    surrounding_box[0] = torch.min(torch.tensor((box1[1], box1[3], box2[1], box2[3])))
+    surrounding_box[1] = torch.min(torch.tensor((box1[2], box1[4], box2[2], box2[4])))
+    surrounding_box[2] = torch.max(torch.tensor((box1[1], box1[3], box2[1], box2[3])))
+    surrounding_box[3] = torch.max(torch.tensor((box1[2], box1[4], box2[2], box2[4])))
+
+    diou = torch.div(torch.cdist(box_1_center[:2], box_2_center[:2]), torch.cdist(surrounding_box[:2], surrounding_box[2:]))
+    pass
+
+def iou(box1, box2):
     pass
