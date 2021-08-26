@@ -1,4 +1,5 @@
 from network_parts import *
+from nms import *
 from utils import *
 
 class DarkNet_53_Mish(nn.Module):
@@ -101,5 +102,6 @@ class YOLOv4_Mish_416(nn.Module):
 model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
 x = torch.rand(3, 3, 416, 416)
 predictions = model(x)
-print(predictions.size())
-print(get_detections(predictions, 0.5).size())
+predictions = batch_indexing(predictions)
+predictions = background_removal(predictions, 10)
+predictions = coordinate_transform(predictions)
