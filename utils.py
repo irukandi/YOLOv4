@@ -1,49 +1,4 @@
 import torch
-import numpy as np
-
-
-def predict_transform(predictions, input_shape=416, anchors=None):
-    # have to check if all this is legit
-    if anchors is None:
-        anchors = [(10, 13), (16, 30), (33, 23)]
-    batch_size = predictions.size(0)
-    grid_size = predictions.size(2)
-    stride = input_shape // grid_size
-    bbox_attrs = predictions.size(1) // 3
-    num_anchors = len(anchors)
-
-    anchors = [(a[0] / stride, a[1] / stride) for a in anchors]
-
-    predictions = predictions.view(batch_size, bbox_attrs * num_anchors, grid_size * grid_size)
-    predictions = predictions.transpose(1, 2).contiguous()
-    predictions = predictions.view(batch_size, grid_size * grid_size * num_anchors, bbox_attrs)
-
-    # Sigmoid the  centre_X, centre_Y. and object confidence
-    predictions[:, :, 0] = torch.sigmoid(predictions[:, :, 0])
-    predictions[:, :, 1] = torch.sigmoid(predictions[:, :, 1])
-    predictions[:, :, 4] = torch.sigmoid(predictions[:, :, 4])
-
-    # Add the center offsets
-    grid_len = torch.arange(grid_size)
-    a, b = torch.meshgrid(grid_len, grid_len)
-
-    x_offset = b.reshape(-1, 1)
-    y_offset = a.reshape(-1, 1)
-
-    x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1, num_anchors).view(-1, 2).unsqueeze(0)
-
-    predictions[:, :, :2] += x_y_offset
-
-    # log space transform height and the width
-    anchors = torch.FloatTensor(anchors)
-    anchors = anchors.repeat(grid_size * grid_size, 1).unsqueeze(0)
-    predictions[:, :, 2:4] = torch.exp(predictions[:, :, 2:4]) * anchors
-
-    # Sigmoid the class scores
-    predictions[:, :, 5: bbox_attrs] = torch.sigmoid((predictions[:, :, 5: 5 + bbox_attrs]))
-    predictions[:, :, :4] *= stride
-
-    return predictions
 
 
 def batch_indexing(predictions):
@@ -54,7 +9,6 @@ def batch_indexing(predictions):
 
 def background_removal(predictions, confidence):
     predictions = predictions[predictions[:, 5] > confidence]
-    print(predictions)
     if predictions.size()[0] > 0:
         class_mask = torch.argmax(predictions[:, 5:], dim=1)
         predictions = torch.cat((predictions[:, :6], class_mask.unsqueeze(1)), dim=1)
@@ -71,8 +25,31 @@ def coordinate_transform(predictions):
         predictions = torch.cat((predictions[:, :5], box_corners, predictions[:, 5:]), dim=1)
     return predictions
 
-def iou(box1, box2):
-    pass
-
 def diou(box1, box2):
-    pass
+    surrounding_box = torch.ones(box2.size()[0], 4)
+    surrounding_box[:, 0] = torch.min(torch.cat((box1[[4, 6]].unsqueeze(0), box2[:, [4, 6]])))
+    surrounding_box[:, 1] = torch.min(torch.cat((box1[[5, 7]].unsqueeze(0), box2[:, [5, 7]])))
+    surrounding_box[:, 2] = torch.max(torch.cat((box1[[4, 6]].unsqueeze(0), box2[:, [4, 6]])))
+    surrounding_box[:, 3] = torch.max(torch.cat((box1[[5, 7]].unsqueeze(0), box2[:, [5, 7]])))
+
+    center_dist = torch.cdist(box1[:2].unsqueeze(0), box2[:, :2]).flatten()
+    corner_dist = torch.square(surrounding_box[:, 2] - surrounding_box[:, 0]) +\
+                  torch.square(surrounding_box[:, 3] - surrounding_box[:, 1])
+
+    relative_distance = torch.div(center_dist, corner_dist)
+
+    intersection_box = torch.ones(box2.size()[0], 4)
+    intersection_box[:, 0] = torch.maximum(box1[4], box2[:, 4])
+    intersection_box[:, 1] = torch.maximum(box1[5], box2[:, 5])
+    intersection_box[:, 2] = torch.minimum(box1[6], box2[:, 6])
+    intersection_box[:, 3] = torch.minimum(box1[7], box2[:, 7])
+
+    intersection = torch.mul(intersection_box[:, 2] - intersection_box[:, 0],
+                             intersection_box[:, 3] - intersection_box[:, 1])
+
+    union = torch.mul(box1[6] - box1[4], box1[7] - box1[5]) +\
+            torch.mul(box2[:, 6] - box2[:, 4], box2[:, 7] - box2[:, 5]) - intersection
+
+    iou = torch.div(intersection, union)
+    diou = iou - relative_distance
+    return diou
