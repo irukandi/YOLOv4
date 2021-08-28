@@ -22,6 +22,7 @@ class Conv(nn.Module):
         x = self.conv(x)
         x = self.batch(x)
         x = self.act(x)
+
         return x
 
 
@@ -42,6 +43,7 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         y = self.convs(x)
         h = torch.add(x, y)
+
         return h
 
 
@@ -68,6 +70,7 @@ class CSPBlock(nn.Module):
         x_2 = self.conv2(x_2)
         x = self.conv3(x)  # So this changes any channels into half their size, making x the size of x_2. But why? WHY?
         h = torch.cat((x, x_2), 1)  # Made my peace with it don't even care
+
         return h  # I've been thinking maybe it's not supposed to do that. Like how the PANet downsampling doesn't
         # Maybe it's just a way of communication access to a prior layer
         # But THATS not in line with the post about yolov4_tiny claiming they have the same structure
@@ -86,6 +89,7 @@ class SPP_YOLO(nn.Module):
         x2 = self.maxpool9(x)
         x3 = self.maxpool13(x)
         x = torch.cat((x, x1, x2, x3), 1)
+
         return x
 
 
@@ -111,6 +115,7 @@ class PANet_block(nn.Module):
                 Conv(in_c=in_c, out_c=in_c // 2, k=1, s=1, p=0),
             )
             self.sam_enabled = False
+
     def forward(self, x):
         if self.sam_enabled:
             x = self.convs(x)
@@ -118,6 +123,7 @@ class PANet_block(nn.Module):
             x = self.conv(x*sam)
         else:
             x = self.convs(x)
+
         return x
 
 
@@ -129,6 +135,7 @@ class Upsample(nn.Module):
     def forward(self, x):
         x = self.conv(x)
         x = F.interpolate(x, scale_factor=(2, 2))  # 100% sure there is a better way to do this
+
         return x
 
 
@@ -140,6 +147,7 @@ class Downsample(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
+
         return x
 
 
@@ -194,6 +202,5 @@ class PANet(nn.Module):
         pred_52 = self.yolo_52(x_52)
         pred_26 = self.yolo_26(x_26)
         pred_13 = self.yolo_13(x_13)
+
         return pred_52, pred_26, pred_13
-
-

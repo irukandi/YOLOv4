@@ -44,6 +44,7 @@ class DarkNet_53_Mish(nn.Module):
         x = self.layer_4(x)
         x = self.layer_5(x)
         x = self.out(x)
+
         return torch.flatten(x)
 
 
@@ -88,14 +89,19 @@ class YOLOv4_Mish_416(nn.Module):
         x = self.layer_1(x)
         x = self.layer_2(x)
         pan_1 = self.layer_3(x)
+
         pan_2 = self.layer_4(pan_1)
         x = self.layer_5(pan_2)
         x = self.layer_6(x)
+
         pred_52, pred_26, pred_13 = self.PANet(x, pan_1, pan_2)
+
         pred_52 = predict_transform(pred_52)
         pred_26 = predict_transform(pred_26)
         pred_13 = predict_transform(pred_13)
+
         predictions = torch.cat((pred_52, pred_26, pred_13), 1)
+
         return predictions
 
 
