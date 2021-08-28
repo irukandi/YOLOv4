@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from utils import calculate_box_coordinates, flatten_predictions
 
 class Mish(nn.Module):
     @staticmethod
@@ -204,3 +205,10 @@ class PANet(nn.Module):
         pred_13 = self.yolo_13(x_13)
 
         return pred_52, pred_26, pred_13
+
+
+def transform_predictions(predictions, anchors=((10, 13), (16, 30), (33, 23)), image_size=(416, 416)):
+    predictions = calculate_box_coordinates(predictions, anchors, image_size)
+    predictions = flatten_predictions(predictions, len(anchors))
+
+    return predictions

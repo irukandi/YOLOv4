@@ -4,18 +4,20 @@ import torch
 def calculate_box_coordinates(predictions, anchors, image_size=(416, 416)):
     anchors_amount = len(anchors)
     data_per_prediction = torch.div(predictions.size(1), anchors_amount)
+    prediction_grid_height = predictions.size()[-2]
+    prediction_grid_width = predictions.size()[-1]
 
     center_indexes = torch.cat([torch.arange(data_per_prediction * i, data_per_prediction * i + 2, dtype=torch.long)
                                 for i in range(anchors_amount)])
     h_w_indexes = torch.cat([torch.arange(data_per_prediction * i + 2, data_per_prediction * i + 4, dtype=torch.long)
                              for i in range(anchors_amount)])
-    x_coordinates = torch.arange(0, image_size[0], image_size[0] / predictions.size()[-2])
-    y_coordinates = torch.arange(0, image_size[1], image_size[1] / predictions.size()[-1])
+    x_coordinates = torch.arange(0, image_size[0], image_size[0] / prediction_grid_height)
+    y_coordinates = torch.arange(0, image_size[1], image_size[1] / prediction_grid_width)
     x_coordinates_grid, y_coordinates_grid = torch.meshgrid(x_coordinates, y_coordinates)
 
     predictions[:, center_indexes] = torch.sigmoid(predictions[:, center_indexes])
-    predictions[:, center_indexes[::2]] += x_coordinates_grid.view(1, 1, 52, 52)
-    predictions[:, center_indexes[1::2]] += y_coordinates_grid.view(1, 1, 52, 52)
+    predictions[:, center_indexes[::2]] += x_coordinates_grid.view(1, 1, prediction_grid_height, prediction_grid_width)
+    predictions[:, center_indexes[1::2]] += y_coordinates_grid.view(1, 1, prediction_grid_height, prediction_grid_width)
 
     predictions[:, h_w_indexes] = torch.exp(predictions[:, h_w_indexes])
     predictions[:, h_w_indexes[::2]] *= torch.Tensor(anchors)[:, 0].view(1, 3, 1, 1)
@@ -23,17 +25,28 @@ def calculate_box_coordinates(predictions, anchors, image_size=(416, 416)):
 
     return predictions
 
-def flatten_predictions(predictions):
-    pass
+
+def flatten_predictions(predictions, anchors_amount):
+    batch_size = predictions.size()[0]
+    attribute_size = torch.div(predictions.size()[1], anchors_amount, rounding_mode='floor')
+    predictions = torch.flatten(predictions, start_dim=2)
+    predictions = predictions.transpose(1, 2).contiguous()
+    predictions = predictions.view(batch_size, -1, attribute_size)
+
+    return predictions
+
 
 def batch_indexing(predictions):
+    # [[cx, cy, w, h, obj_score, classes..], ...] -> [img_idx, cx, cy, w, h, obj_score, classes...]
     image_index = torch.ones_like(predictions[:, :, 1]) * torch.arange(predictions.size()[0]).unsqueeze(1)
     predictions = torch.cat((image_index.unsqueeze(2), predictions), dim=2)
     predictions = torch.flatten(predictions, end_dim=1)
 
     return predictions
 
+
 def background_removal(predictions, confidence):
+    # [img_idx, cx, cy, w, h, obj_score, classes...] -> [img_idx, cx, cy, w, h, obj_score, class]
     predictions = predictions[predictions[:, 5] > confidence]
     if predictions.size()[0] > 0:
         class_mask = torch.argmax(predictions[:, 5:], dim=1)
@@ -41,49 +54,54 @@ def background_removal(predictions, confidence):
 
     return predictions
 
-def coordinate_transform(predictions):
-    # later:remove height and width, not needed
+
+def coordinate_transform(predictions, image_size=(416, 416)):
+    # [img_idx, cx, cy, w, h, obj_score, class] ->
+    # [img_idx, cx, cy, top_leftx, top_lefty, bottom_rightx, bottom_righty, obj_score, class]
     if predictions.size()[0] > 0:
         box_corners = torch.ones(predictions.size()[0], 4)
-        box_corners[:, 0] = predictions[:, 1] - torch.div(predictions[:, 3], 2, rounding_mode='floor')
-        box_corners[:, 1] = predictions[:, 2] - torch.div(predictions[:, 4], 2, rounding_mode='floor')
-        box_corners[:, 2] = predictions[:, 1] + torch.div(predictions[:, 3], 2, rounding_mode='floor')
-        box_corners[:, 3] = predictions[:, 2] + torch.div(predictions[:, 4], 2, rounding_mode='floor')
+        box_corners[:, 0] = predictions[:, 1] - torch.div(predictions[:, 4], 2, rounding_mode='floor')
+        box_corners[:, 1] = predictions[:, 2] - torch.div(predictions[:, 3], 2, rounding_mode='floor')
+        box_corners[:, 2] = predictions[:, 1] + torch.div(predictions[:, 4], 2, rounding_mode='floor')
+        box_corners[:, 3] = predictions[:, 2] + torch.div(predictions[:, 3], 2, rounding_mode='floor')
 
-        predictions = torch.cat((predictions[:, :5], box_corners, predictions[:, 5:]), dim=1)
+        box_corners[box_corners < 0] = 0
+        box_corners[:, 2][box_corners[:, 2] > image_size[0]] = image_size[0]
+        box_corners[:, 3][box_corners[:, 3] > image_size[1]] = image_size[1]
+
+        predictions = torch.cat((predictions[:, :3], box_corners, predictions[:, 5:]), dim=1)
 
     return predictions
 
+
 def diou(box1, box2):
+    # box_shape: [img_idx, cx, cy, top_leftx, top_lefty, bottom_rightx, bottom_righty, obj_score, class]
     surrounding_box = torch.ones(box2.size()[0], 4)
-    surrounding_box[:, 0] = torch.min(torch.cat((box1[[4, 6]].unsqueeze(0), box2[:, [4, 6]])))
-    surrounding_box[:, 1] = torch.min(torch.cat((box1[[5, 7]].unsqueeze(0), box2[:, [5, 7]])))
-    surrounding_box[:, 2] = torch.max(torch.cat((box1[[4, 6]].unsqueeze(0), box2[:, [4, 6]])))
-    surrounding_box[:, 3] = torch.max(torch.cat((box1[[5, 7]].unsqueeze(0), box2[:, [5, 7]])))
+    surrounding_box[:, 0] = torch.minimum(box1[3], box2[:, 3])
+    surrounding_box[:, 1] = torch.minimum(box1[4], box2[:, 4])
+    surrounding_box[:, 2] = torch.maximum(box1[5], box2[:, 5])
+    surrounding_box[:, 3] = torch.maximum(box1[6], box2[:, 6])
 
     center_dist = torch.cdist(box1[:2].unsqueeze(0), box2[:, :2]).flatten()
-    corner_dist = torch.square(surrounding_box[:, 2] - surrounding_box[:, 0]) +\
+    corner_dist = torch.square(surrounding_box[:, 2] - surrounding_box[:, 0]) + \
                   torch.square(surrounding_box[:, 3] - surrounding_box[:, 1])
 
     relative_distance = torch.div(center_dist, corner_dist)
 
     intersection_box = torch.ones(box2.size()[0], 4)
-    intersection_box[:, 0] = torch.maximum(box1[4], box2[:, 4])
-    intersection_box[:, 1] = torch.maximum(box1[5], box2[:, 5])
-    intersection_box[:, 2] = torch.minimum(box1[6], box2[:, 6])
-    intersection_box[:, 3] = torch.minimum(box1[7], box2[:, 7])
+    intersection_box[:, 0] = torch.maximum(box1[3], box2[:, 3])
+    intersection_box[:, 1] = torch.maximum(box1[4], box2[:, 4])
+    intersection_box[:, 2] = torch.minimum(box1[5], box2[:, 5])
+    intersection_box[:, 3] = torch.minimum(box1[6], box2[:, 6])
+    intersection_height = torch.maximum(torch.zeros(1), intersection_box[:, 2] - intersection_box[:, 0])
+    intersection_width = torch.maximum(torch.zeros(1), intersection_box[:, 3] - intersection_box[:, 1])
 
-    intersection = torch.mul(intersection_box[:, 2] - intersection_box[:, 0],
-                             intersection_box[:, 3] - intersection_box[:, 1])
+    intersection = torch.mul(intersection_height, intersection_width)
 
-    union = torch.mul(box1[6] - box1[4], box1[7] - box1[5]) +\
-            torch.mul(box2[:, 6] - box2[:, 4], box2[:, 7] - box2[:, 5]) - intersection
+    union = torch.mul(box1[5] - box1[3], box1[6] - box1[4]) + \
+            torch.mul(box2[:, 5] - box2[:, 3], box2[:, 6] - box2[:, 4]) - intersection
 
     iou = torch.div(intersection, union)
-    diou = iou - relative_distance
+    diou_value = iou - relative_distance
 
-    return diou
-
-x = torch.rand((3, 30, 52, 52))
-
-calculate_box_coordinates(x, [(10, 13), (16, 30), (33, 23)])
+    return diou_value

@@ -1,6 +1,6 @@
 from network_parts import *
-from post_process import *
 from utils import *
+from nms import nms
 
 class DarkNet_53_Mish(nn.Module):
     def __init__(self, classes=30):
@@ -96,9 +96,9 @@ class YOLOv4_Mish_416(nn.Module):
 
         pred_52, pred_26, pred_13 = self.PANet(x, pan_1, pan_2)
 
-        pred_52 = predict_transform(pred_52)
-        pred_26 = predict_transform(pred_26)
-        pred_13 = predict_transform(pred_13)
+        pred_52 = transform_predictions(pred_52)
+        pred_26 = transform_predictions(pred_26)
+        pred_13 = transform_predictions(pred_13)
 
         predictions = torch.cat((pred_52, pred_26, pred_13), 1)
 
@@ -108,8 +108,12 @@ class YOLOv4_Mish_416(nn.Module):
 model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
 x = torch.rand(3, 3, 416, 416)
 predictions = model(x)
+print(predictions.size())
 predictions = batch_indexing(predictions)
+print(predictions.size())
 predictions = background_removal(predictions, 0.5)
+print(predictions.size())
 predictions = coordinate_transform(predictions)
-
-diou(predictions[0, 1:9], predictions[1:, 1:9])
+print(predictions.size())
+diou = diou(predictions[500], predictions[501:])
+print(diou.size())
