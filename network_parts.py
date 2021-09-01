@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import calculate_box_coordinates, flatten_predictions
+from utils import calculate_box_coordinates, flatten_predictions, batch_indexing, \
+    background_removal, coordinate_transform
+
 
 class Mish(nn.Module):
     @staticmethod
@@ -210,5 +212,17 @@ class PANet(nn.Module):
 def transform_predictions(predictions, anchors=((10, 13), (16, 30), (33, 23)), image_size=(416, 416)):
     predictions = calculate_box_coordinates(predictions, anchors, image_size)
     predictions = flatten_predictions(predictions, len(anchors))
+
+    return predictions
+
+
+def post_processing(predictions, confidence, verbose):
+    if verbose:
+        print(f'\tRecived predictions, running post-processing...')
+    predictions = batch_indexing(predictions)
+    predictions = background_removal(predictions, confidence)
+    predictions = coordinate_transform(predictions)
+    if verbose:
+        print(f'\tPost-processing of predictions successful, {predictions.size()[0]} detections found.')
 
     return predictions

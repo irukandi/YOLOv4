@@ -1,6 +1,7 @@
 from network_parts import *
-from utils import *
+from utils import * ## can be removed once post_processing is a single functions
 from nms import nms
+import time
 
 class DarkNet_53_Mish(nn.Module):
     def __init__(self, classes=30):
@@ -36,6 +37,7 @@ class DarkNet_53_Mish(nn.Module):
             nn.Conv2d(in_channels=1024, out_channels=classes, kernel_size=1, stride=1, padding=0),
             nn.Softmax(),
         )
+        print(f'Initiated DarkNet_53_Mish with {classes} classes\n')
 
     def forward(self, x):
         x = self.layer_1(x)
@@ -49,7 +51,7 @@ class DarkNet_53_Mish(nn.Module):
 
 
 class YOLOv4_Mish_416(nn.Module):
-    def __init__(self, classes=80, sam_enabled=False):
+    def __init__(self, classes=80, sam_enabled=False, verbose=True):
         super().__init__()
         self.layer_1 = nn.Sequential(
             Conv(in_c=3, out_c=32, k=3, s=1, p=1),
@@ -84,8 +86,13 @@ class YOLOv4_Mish_416(nn.Module):
             SPP_YOLO()
         )
         self.PANet = PANet(classes=classes, sam_enabled=sam_enabled)  # contains YOLO detection
+        self.verbose = verbose
+        if verbose:
+            print(f'Initiated YOLOv4_Mish_416 with {classes} classes')
+            if sam_enabled:
+                print('\tSpatial-Attention-Module has been enabled.')
 
-    def forward(self, x):
+    def forward(self, x, train=False):
         x = self.layer_1(x)
         x = self.layer_2(x)
         pan_1 = self.layer_3(x)
@@ -101,19 +108,15 @@ class YOLOv4_Mish_416(nn.Module):
         pred_13 = transform_predictions(pred_13)
 
         predictions = torch.cat((pred_52, pred_26, pred_13), 1)
+        predictions[:, :, 4] = torch.sigmoid(predictions[:, :, 4])
+        predictions = post_processing(predictions, confidence=0.5, verbose=self.verbose)
+
+        if not train:
+            predictions = nms(predictions, verbose=self.verbose)
 
         return predictions
 
 
-model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
+model = YOLOv4_Mish_416(classes=5, sam_enabled=True)
 x = torch.rand(3, 3, 416, 416)
 predictions = model(x)
-print(predictions.size())
-predictions = batch_indexing(predictions)
-print(predictions.size())
-predictions = background_removal(predictions, 0.5)
-print(predictions.size())
-predictions = coordinate_transform(predictions)
-print(predictions.size())
-diou = diou(predictions[500], predictions[501:])
-print(diou.size())
