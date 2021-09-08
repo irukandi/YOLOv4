@@ -115,6 +115,6 @@ class YOLOv4_Mish_416(nn.Module):
         return predictions
 
 
-model = YOLOv4_Mish_416(classes=5, sam_enabled=True)
-x = torch.rand(3, 3, 416, 416)
-predictions = model(x)
+# model = YOLOv4_Mish_416(classes=5, sam_enabled=True)
+# x = torch.rand(3, 3, 416, 416)
+# predictions = model(x)

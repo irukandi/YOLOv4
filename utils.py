@@ -1,4 +1,5 @@
 import torch
+import pandas as pd
 
 
 def calculate_box_coordinates(predictions, anchors, image_size=(416, 416)):
@@ -105,3 +106,22 @@ def diou(box1, box2):
     diou_value = iou - relative_distance
 
     return diou_value
+
+
+def get_target_data(image_path, data_frame):
+    image_name = image_path.rsplit("/", 1)[-1]
+    bbox_columns = ['tl_x', 'tl_y', 'br_x', 'br_y']
+    rows = data_frame[data_frame.iloc[:, 0] == image_name]
+
+    return rows['class'].values, rows[bbox_columns].values
+
+
+def read_labels(classes_file_path):
+    class_labels = pd.read_csv(classes_file_path, header=None)
+    class_labels = dict(class_labels.values)
+    return class_labels
+
+
+def labels_to_id(labels, labels_id):
+    labels = [labels_id[label] for label in labels]
+    return labels

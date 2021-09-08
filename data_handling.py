@@ -5,6 +5,7 @@ from fastai.vision.all import get_image_files
 import pandas as pd
 from torch.utils.data import Dataset
 import random
+from utils import get_target_data, read_labels, labels_to_id
 
 
 class Data(Dataset):
@@ -67,27 +68,7 @@ class Data(Dataset):
         cv2.waitKey(0)
 
 
-def get_target_data(image_path, data_frame):
-    image_name = image_path.rsplit("/", 1)[-1]
-    bbox_columns = ['tl_x', 'tl_y', 'br_x', 'br_y']
-    rows = data_frame[data_frame.iloc[:, 0] == image_name]
-
-    return rows['class'].values, rows[bbox_columns].values
-
-
-def read_labels(classes_file_path):
-    class_labels = pd.read_csv(classes_file_path, header=None)
-    class_labels = dict(class_labels.values)
-    return class_labels
-
-
-def labels_to_id(labels, labels_id):
-    labels = [labels_id[label] for label in labels]
-    return labels
-
-
-root = "Example_Dataset/"
-
-data = Data(root, images_path="train", classes_file_path="class_names.csv", annotations_file_path="train/_annotations.csv")
-
-data.example_image()
+# root = "Example_Dataset/"
+# data = Data(root, images_path="train", classes_file_path="class_names.csv",
+#             annotations_file_path="train/_annotations.csv")
+# data.example_image()

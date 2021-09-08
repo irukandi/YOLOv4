@@ -31,4 +31,3 @@ def nms(predictions, nms_threshold=0.5, verbose=True):
     return final_detection_buffer
 
 # important: YOLOv4 team counts from top left, BUT x is horizontal and y vertical
-## REWRITE predict_transform, wrap utils in post_process function
