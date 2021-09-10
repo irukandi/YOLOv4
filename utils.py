@@ -39,7 +39,7 @@ def flatten_predictions(predictions, anchors_amount):
 
 def batch_indexing(predictions):
     # [[cx, cy, w, h, obj_score, classes..], ...] -> [img_idx, cx, cy, w, h, obj_score, classes...]
-    image_index = torch.ones_like(predictions[:, :, 1]) * torch.arange(predictions.size()[0]).unsqueeze(1)
+    image_index = torch.ones_like(predictions[:, :, 0]) * torch.arange(predictions.size()[0]).unsqueeze(1)
     predictions = torch.cat((image_index.unsqueeze(2), predictions), dim=2)
     predictions = torch.flatten(predictions, end_dim=1)
 
@@ -48,15 +48,16 @@ def batch_indexing(predictions):
 
 def background_removal(predictions, confidence):
     # [img_idx, cx, cy, w, h, obj_score, classes...] -> [img_idx, cx, cy, w, h, obj_score, class]
-    predictions = predictions[predictions[:, 5] > confidence]
     if predictions.size()[0] > 0:
-        class_mask = torch.argmax(predictions[:, 5:], dim=1)
+        class_mask = torch.argmax(predictions[:, 6:], dim=1)
+        predictions[:, 5] *= predictions[torch.arange(predictions.size()[0]), class_mask + 6]
         predictions = torch.cat((predictions[:, :6], class_mask.unsqueeze(1)), dim=1)
+        predictions = predictions[predictions[:, 5] > confidence]
 
     return predictions
 
 
-def coordinate_transform(predictions, image_size=(416, 416)):
+def coordinate_transform(predictions, interference=True, image_size=(416, 416)):
     # [img_idx, cx, cy, w, h, obj_score, class] ->
     # [img_idx, cx, cy, top_leftx, top_lefty, bottom_rightx, bottom_righty, obj_score, class]
     if predictions.size()[0] > 0:
@@ -78,28 +79,28 @@ def coordinate_transform(predictions, image_size=(416, 416)):
 def diou(box1, box2):
     # box_shape: [img_idx, cx, cy, top_leftx, top_lefty, bottom_rightx, bottom_righty, obj_score, class]
     surrounding_box = torch.ones(box2.size()[0], 4)
-    surrounding_box[:, 0] = torch.minimum(box1[3], box2[:, 3])
-    surrounding_box[:, 1] = torch.minimum(box1[4], box2[:, 4])
-    surrounding_box[:, 2] = torch.maximum(box1[5], box2[:, 5])
-    surrounding_box[:, 3] = torch.maximum(box1[6], box2[:, 6])
+    surrounding_box[:, 0] = torch.minimum(box1[:, 3], box2[:, 3])
+    surrounding_box[:, 1] = torch.minimum(box1[:, 4], box2[:, 4])
+    surrounding_box[:, 2] = torch.maximum(box1[:, 5], box2[:, 5])
+    surrounding_box[:, 3] = torch.maximum(box1[:, 6], box2[:, 6])
 
-    center_dist = torch.cdist(box1[:2].unsqueeze(0), box2[:, :2]).flatten()
+    center_dist = torch.cdist(box1[:, :2].unsqueeze(0), box2[:, :2]).flatten()
     corner_dist = torch.square(surrounding_box[:, 2] - surrounding_box[:, 0]) + \
                   torch.square(surrounding_box[:, 3] - surrounding_box[:, 1])
 
     relative_distance = torch.div(center_dist, corner_dist)
 
     intersection_box = torch.ones(box2.size()[0], 4)
-    intersection_box[:, 0] = torch.maximum(box1[3], box2[:, 3])
-    intersection_box[:, 1] = torch.maximum(box1[4], box2[:, 4])
-    intersection_box[:, 2] = torch.minimum(box1[5], box2[:, 5])
-    intersection_box[:, 3] = torch.minimum(box1[6], box2[:, 6])
+    intersection_box[:, 0] = torch.maximum(box1[:, 3], box2[:, 3])
+    intersection_box[:, 1] = torch.maximum(box1[:, 4], box2[:, 4])
+    intersection_box[:, 2] = torch.minimum(box1[:, 5], box2[:, 5])
+    intersection_box[:, 3] = torch.minimum(box1[:, 6], box2[:, 6])
     intersection_height = torch.maximum(torch.zeros(1), intersection_box[:, 2] - intersection_box[:, 0])
     intersection_width = torch.maximum(torch.zeros(1), intersection_box[:, 3] - intersection_box[:, 1])
 
     intersection = torch.mul(intersection_height, intersection_width)
 
-    union = torch.mul(box1[5] - box1[3], box1[6] - box1[4]) + \
+    union = torch.mul(box1[:, 5] - box1[:, 3], box1[:, 6] - box1[:, 4]) + \
             torch.mul(box2[:, 5] - box2[:, 3], box2[:, 6] - box2[:, 4]) - intersection
 
     iou = torch.div(intersection, union)

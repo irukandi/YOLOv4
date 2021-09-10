@@ -17,7 +17,7 @@ def nms(predictions, nms_threshold=0.5, verbose=True):
             class_data = image_data[image_data[:, -1] == class_idx]
             idx = 0
             while idx < class_data.size()[0]:
-                dious = diou(class_data[idx], class_data[idx + 1:])
+                dious = diou(class_data[idx].unsqueeze(0), class_data[idx + 1:])
                 class_data[idx + 1:, -2][dious > nms_threshold] = 0
                 class_data = class_data[torch.nonzero(class_data[:, -2]).flatten()]
                 idx += 1
@@ -29,5 +29,3 @@ def nms(predictions, nms_threshold=0.5, verbose=True):
         print(f'\tNon-Maximum-Suppression successful, {final_detection_buffer.size()[0]} detections kept.')
 
     return final_detection_buffer
-
-# important: YOLOv4 team counts from top left, BUT x is horizontal and y vertical

@@ -1,6 +1,7 @@
 from network_parts import *
 from nms import nms
 
+
 class DarkNet_53_Mish(nn.Module):
     def __init__(self, classes=30):
         super().__init__()
@@ -85,10 +86,10 @@ class YOLOv4_Mish_416(nn.Module):
         )
         self.PANet = PANet(classes=classes, sam_enabled=sam_enabled)  # contains YOLO detection
         self.verbose = verbose
-        if verbose:
-            print(f'Initiated YOLOv4_Mish_416 with {classes} classes')
-            if sam_enabled:
-                print('\tSpatial-Attention-Module has been enabled.')
+        if verbose and sam_enabled:
+            print(f'Initiated YOLOv4_Mish_416 with {classes} classes. Spatial-Attention-Module has been enabled.')
+        if verbose and not sam_enabled:
+            print(f'Initiated YOLOv4_Mish_416 with {classes} classes.')
 
     def forward(self, x, train=False):
         x = self.layer_1(x)
@@ -105,16 +106,23 @@ class YOLOv4_Mish_416(nn.Module):
         pred_26 = transform_predictions(pred_26)
         pred_13 = transform_predictions(pred_13)
 
-        predictions = torch.cat((pred_52, pred_26, pred_13), 1)
-        predictions[:, :, 4] = torch.sigmoid(predictions[:, :, 4])
-        predictions = post_processing(predictions, confidence=0.5, verbose=self.verbose)
+        predictions = torch.cat((pred_52, pred_26, pred_13), dim=1)
 
-        if not train:
+        if train:
+            predictions = batch_indexing(predictions)
+            predictions = coordinate_transform(predictions)
+        else:
+            predictions[:, :, 4] = torch.sigmoid(predictions[:, :, 4])
+            predictions[:, :, 5:] = torch.softmax(predictions[:, :, 5:], dim=2)
+            predictions = post_processing(predictions, confidence=0.3, verbose=self.verbose)
             predictions = nms(predictions, verbose=self.verbose)
+            predictions = torch.cat((predictions[:, 0].unsqueeze(1), predictions[:, 3:]), dim=1)
 
         return predictions
 
 
-# model = YOLOv4_Mish_416(classes=5, sam_enabled=True)
-# x = torch.rand(3, 3, 416, 416)
-# predictions = model(x)
+model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
+x = torch.rand(3, 3, 416, 416)
+predictions = model(x, train=True)
+from utils import diou
+print(diou(predictions, predictions))
