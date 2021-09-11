@@ -124,5 +124,6 @@ class YOLOv4_Mish_416(nn.Module):
 model = YOLOv4_Mish_416(classes=5, sam_enabled=False)
 x = torch.rand(3, 3, 416, 416)
 predictions = model(x, train=True)
-from utils import diou
-print(diou(predictions, predictions))
+print(predictions[1000])
+# from utils import diou
+# print(diou(predictions, predictions))

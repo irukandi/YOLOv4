@@ -8,15 +8,21 @@ def calculate_box_coordinates(predictions, anchors, image_size=(416, 416)):
     prediction_grid_height = predictions.size()[-2]
     prediction_grid_width = predictions.size()[-1]
 
+    x_step_size = image_size[0] / prediction_grid_height
+    y_step_size = image_size[1] / prediction_grid_width
+
     center_indexes = torch.cat([torch.arange(data_per_prediction * i, data_per_prediction * i + 2, dtype=torch.long)
                                 for i in range(anchors_amount)])
     h_w_indexes = torch.cat([torch.arange(data_per_prediction * i + 2, data_per_prediction * i + 4, dtype=torch.long)
                              for i in range(anchors_amount)])
-    x_coordinates = torch.arange(0, image_size[0], image_size[0] / prediction_grid_height)
-    y_coordinates = torch.arange(0, image_size[1], image_size[1] / prediction_grid_width)
+    x_coordinates = torch.arange(0, image_size[0], x_step_size)
+    y_coordinates = torch.arange(0, image_size[1], y_step_size)
     x_coordinates_grid, y_coordinates_grid = torch.meshgrid(x_coordinates, y_coordinates)
 
     predictions[:, center_indexes] = torch.sigmoid(predictions[:, center_indexes])
+    predictions[:, center_indexes[::2]] *= x_step_size
+    predictions[:, center_indexes[1::2]] *= y_step_size
+    predictions[:, center_indexes] = torch.round(predictions[:, center_indexes])
     predictions[:, center_indexes[::2]] += x_coordinates_grid.view(1, 1, prediction_grid_height, prediction_grid_width)
     predictions[:, center_indexes[1::2]] += y_coordinates_grid.view(1, 1, prediction_grid_height, prediction_grid_width)
 
