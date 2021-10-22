@@ -18,14 +18,14 @@ loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
 optimizer = optim.Adam(model.parameters(), lr=0.001)  # select parameters manually, insert cosine annealing scheduler
 
 for epoch in range(epochs):
-  for data in loader:
-    X, y = data
-    model.zero_grad()
-    output = model(X)
-    loss = Loss(output, y)
-    loss.backward()
-    optimizer.step()
-    
-   print(loss)
+    for data in loader:
+        X, y = data
+        model.zero_grad()
+        output = model(X)
+        loss = Loss(output, y)
+        loss.backward()
+        optimizer.step()
+
+    print(loss)
   
 # perform test with torch.no_grad()
